@@ -1,0 +1,27 @@
+{
+  "name": "svg-input",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "webpack"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Andrey1024/svg-input.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Andrey1024/svg-input/issues"
+  },
+  "homepage": "https://github.com/Andrey1024/svg-input#readme",
+  "devDependencies": {
+    "babel-core": "^6.22.1",
+    "babel-loader": "^6.2.10",
+    "jquery": "^3.1.1",
+    "webpack": "^2.2.0",
+    "webpack-dev-server": "^1.16.2"
+  }
+}
