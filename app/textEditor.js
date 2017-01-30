@@ -1,5 +1,4 @@
 import $ from 'jquery'
-
 const svgNS = 'http://www.w3.org/2000/svg';
 let inputElement;
 let editables = [];
@@ -12,103 +11,123 @@ function setAttributes(obj) {
 
 export default class TextEditor {
     constructor(parent, string, options) {
-        this._lineHeight = 15;
+        this.__lineHeight = 15;
 
-        this._options = options; //TODO: default values
-        this._value = string;
-        this._root = parent;
+        this.__options = options; //TODO: default values
+        this.__value = string;
+        this.__root = parent;
 
-        this._appendInputElement();
-        this._appendTextElement();
-        this._render();
+        this.__appendInputElement();
+        this.__appendTextElement();
+        this.__render();
+        editables.push(this);
     }
 
-    startEdit() {
-        this._promise = $.Deferred();
+    startEdit(event) {
+        this.__promise = $.Deferred();
+        editables.filter(e => e != this).forEach((e) => {
+            e.endEdit();
+        })
 
-        inputElement.value = this._value;
+        inputElement.value = this.__value;
         inputElement.focus();
-        $(inputElement).bind('keyup input', e => this._keyup(e));
-        $(this._textElement).bind('mousedown', e => this._mouseDown(e));
-        $(this._textElement).bind('mousemove', e => this._mouseMove(e));
-        $(this._textElement).bind('mouseup', e => this._mouseUp(e))
+        $(inputElement).bind('keyup input', e => this.__keyup(e));
+        $(this.__textElement).bind('mousedown', e => this.__mouseDown(e));
+        $(inputElement).blur(() => this.endEdit());
 
-
-        this._render();
-        this._renderTimeout();
-        return this._promise.promise();
+        this.__init();
+        let index = event ? this.__getIndexFromPos(event.pageX, event.pageY) : this.__value.length;
+        this.__lastSelectEnd = this.__lastSelectStart = index;
+        this.__setCursor(index);
+        return this.__promise.promise();
     }
 
     endEdit() {
-        if (!this._promise) return;
+        if (!this.__promise) return;
         
-        inputElement.blur();
         $(inputElement).unbind('keyup input');
-        $(this._textElement).unbind('mousedown');
-        $(this._textElement).unbind('mousemove');
-        $(this._textElement).unbind('mouseup'); 
-        if (this._blink) {
-            clearInterval(this._blink);
-            this._blink = false;
-        }
-        if (this._cursor) {
-            $(this._cursor).remove();
-            this._cursor = false;
-        }
-
-		$('.js-texteditor-selblock', $(this._root)).remove();
-        this._promise.resolve(inputElement.value);
-        this._promise = false;
+        $(this.__textElement).unbind('mousedown');
+        $(this.__textElement).unbind('mousemove');
+        this.__deleteCursor();
+        this.__deleteSelBlock();
+        this.__promise.resolve(inputElement.value);
+        this.__promise = false;
     }
 
     update(parent, string, options) {
         this.endEdit();
-        this._options = options;
-        this._value = string;
-        this._root = parent;
-        if (!document.body.contains(this._textElement)) parent.appendChild(this._textElement);
-        this._render();
+        this.__options = options;
+        this.__value = string;
+        this.__root = parent;
+        if (!document.body.contains(this.__textElement)) parent.appendChild(this.__textElement);
+        this.__render();
     }
 
-    isInEditMode() {
-        return !!this._promise;
+    __isInEditMode() {
+        return !!this.__promise;
     }
 
-    _getLineOfChar(index) {
-		if (index >= this._textElement.getNumberOfChars()) return this._stringsNum - 1;
+    __getLineOfChar(index) {
+		if (index >= this.__textElement.getNumberOfChars()) return this.__stringsNum - 1;
 
 		let res = 0;
-		let sum = this._stringsData[0];
+		let sum = this.__stringsData[0];
 		while(sum <= index) {
-			sum += this._stringsData[++res];
+			sum += this.__stringsData[++res];
 		}
 		return res;
 	}
 
-    _getCharBBox(index) {
-        if (this._value.length <= index) {
-            let end = this._textElement.getEndPositionOfChar(this._value.length - 1);
-            let line = this._getLineOfChar(index);
+	__lactCharIndex(line) {	
+		let cur = 0;	
+		let sum = this.__stringsData[cur];
+		while(cur < line) {
+			sum += this.__stringsData[++cur];
+		}
+		return sum - 1;
+	}
+
+	__firstCharIndex(line) {
+		let cur = 0;		
+		let sum = 0;
+		while(cur < line) {
+			sum += this.__stringsData[cur++];
+		}
+		return sum;
+	}
+
+    __getCharBBox(index) {
+        if (this.__value.length == 0) {
             return {
-                x: end.x,
-                y: this._textbb.y + this._lineHeight * line,
+                x: this.__options.isCenterAligned ? this.__options.x + this.__options.width / 2 : this.__options.x,
+                y: this.__options.isVerticalCenterAligned ? this.__options.y + (this.__options.height - this.__lineHeight) / 2 : this.__options.y,
                 width: 0,
-                height: this._lineHeight
+                height: this.__lineHeight
             }
         }
-		let start = this._textElement.getStartPositionOfChar(index);
-		let end = this._textElement.getEndPositionOfChar(index);
-		let line = this._getLineOfChar(index);
+        if (this.__value.length <= index) {
+            let end = this.__textElement.getEndPositionOfChar(this.__value.length - 1);
+            let line = this.__getLineOfChar(index);
+            return {
+                x: end.x,
+                y: this.__textbb.y + this.__lineHeight * line,
+                width: 0,
+                height: this.__lineHeight
+            }
+        }
+		let start = this.__textElement.getStartPositionOfChar(index);
+		let end = this.__textElement.getEndPositionOfChar(index);
+		let line = this.__getLineOfChar(index);
 
 		return {
 			x: start.x,
-			y: this._textbb.y + this._lineHeight * line,
+			y: this.__textbb.y + this.__lineHeight * line,
 			width: end.x - start.x,
-			height: this._lineHeight
+			height: this.__lineHeight
 		}
     }
 
-	_appendSelblockElement(left, right) {
+	__appendSelblock(left, right) {
         let dstr =  'M' + left.tx  + ',' + left.ty
                  + ' L' + right.tx + ',' + right.ty
                  + ' '  + right.bx + ',' + right.by
@@ -120,21 +139,21 @@ export default class TextEditor {
             'class': 'js-texteditor-selblock',
             'd': dstr
         });
-        this._root.appendChild(select);
+        select.style['pointer-events'] = 'none';
+        this.__root.appendChild(select);
 	}
     
-    _setSelection(from, to) {
-		$('.js-texteditor-selblock', $(this._root)).remove();
-		inputElement.selectionStart = from;
-		inputElement.selectionEnd = to;
+    __setSelection(from, to) {
+		this.__deleteCursor();
+        this.__deleteSelBlock();
 
-		let curLine = this._getLineOfChar(from);
-		let endLine = this._getLineOfChar(to);
+		let curLine = this.__getLineOfChar(from);
+		let endLine = this.__getLineOfChar(to);
 
 		let fromChar = from;
 		let toChar;
 
-		let fromBBox = this._getCharBBox(fromChar);
+		let fromBBox = this.__getCharBBox(fromChar);
 		let l = {
 			tx: fromBBox.x,
 			ty: fromBBox.y,
@@ -143,17 +162,17 @@ export default class TextEditor {
 		}
 
 		while(curLine < endLine) {
-			toChar = this._lactCharIndex(curLine);
-			let toBBox = this._getCharBBox(toChar);
+			toChar = this.__lactCharIndex(curLine);
+			let toBBox = this.__getCharBBox(toChar);
 			let r = {
 				tx: toBBox.x + toBBox.width,
 				ty: toBBox.y,
 				bx: toBBox.x + toBBox.width,
 				by: toBBox.y + toBBox.height
 			}
-            this._appendSelblockElement(l, r);
-			fromChar = this._firstCharIndex(++curLine);
-			let fromBBox = this._getCharBBox(fromChar);
+            this.__appendSelblock(l, r);
+			fromChar = this.__firstCharIndex(++curLine);
+			let fromBBox = this.__getCharBBox(fromChar);
 			l = {
 				tx: fromBBox.x,
 				ty: fromBBox.y,
@@ -163,125 +182,132 @@ export default class TextEditor {
 		}
 		
 		toChar = to;
-		let toBBox = this._getCharBBox(toChar);
+		let toBBox = this.__getCharBBox(toChar);
 		let r = {
 			tx: toBBox.x + toBBox.width,
 			ty: toBBox.y,
 			bx: toBBox.x + toBBox.width,
 			by: toBBox.y + toBBox.height
 		};
-        this._appendSelblockElement(l, r);
+        this.__appendSelblock(l, r);
 	}
 
-    _setCursor(index) {
+    __setCursor(index) {
+		this.__deleteSelBlock();
         inputElement.selectionStart = inputElement.selectionEnd = index;
-        if (!this._cursor) this._appendCursorElement();
-        let charData = this._getCharBBox(index);
-        setAttributes.call(this._cursor, {
+        if (!this.__cursor) this.__appendCursorElement();
+        let charData = this.__getCharBBox(index);
+        setAttributes.call(this.__cursor, {
             'x1': charData.x,
             'y1': charData.y,
             'x2': charData.x,
             'y2': charData.y + charData.height
         });
-        this._cursor.style.display = 'inline';
-		if (!this._blink) this._blink = setInterval(() => {
-			this._cursor.style.display = this._cursor.style.display == 'none' ? 'inline' : 'none';
+        this.__cursor.style.display = 'inline';
+		if (!this.__blink) this.__blink = setInterval(() => {
+			this.__cursor.style.display = this.__cursor.style.display == 'none' ? 'inline' : 'none';
 		}, 500);
     }
 
-    _screenToUser(mouseX, mouseY) {
-        let transform = this._textElement.getScreenCTM().inverse();
-        let result = this._textElement.ownerSVGElement.createSVGPoint();
+    __screenToUser(mouseX, mouseY) {
+        let transform = this.__textElement.getScreenCTM().inverse();
+        let result = this.__textElement.ownerSVGElement.createSVGPoint();
         result.x = transform.a * mouseX + transform.c * mouseY + transform.e;
         result.y = transform.b * mouseX + transform.d * mouseY + transform.f;
 
         return result;
     }
 
-    _getIndexFromPos(mouseX, mouseY) {
-        let usrPos = this._screenToUser(mouseX, mouseY);
-        let index = this._textElement.getCharNumAtPosition(usrPos);
-        if (index == -1) return;
+    __getIndexFromPos(mouseX, mouseY) {
+        let usrPos = this.__screenToUser(mouseX, mouseY);
+        let index = this.__textElement.getCharNumAtPosition(usrPos);
+        if (index == -1) return this.__value.length;
 
-        let charData = this._getCharBBox(index);
+        let charData = this.__getCharBBox(index);
 		index = usrPos.x < charData.x + charData.width / 2 ? index : index + 1;
 
         return index;
     }
 
-    _render() {
-		if (!document.body.contains(this._textElement)) return;
-        $(this._textElement).empty();
-        let options = this._options;
+    __init() {
+        if (this.__isInEditMode()) {            
+            this.__textbb = this.__textElement.getBBox();
+            let tspans = this.__textElement.childNodes;
+            this.__stringsNum = tspans.length;
+            this.__stringsData = [];
+            this.__stringsData.lenght = this.__stringsNum;
+            for (let i = 0; i < this.__stringsNum; i++) {
+                this.__stringsData[i] = tspans[i].getNumberOfChars();
+            }
+        }
+    }
+
+    __render() {
+		if (!document.body.contains(this.__textElement)) return;
+        $(this.__textElement).empty();
+        let options = this.__options;
 		let stringsNum = 0;
-		let words = this._value.split(' ');
+		let words = this.__value.split(' ');
 		while (words.length) {
 			let localstr = words.shift();
 			let test = localstr + ' ' + words[0];
 			let tspan = document.createElementNS(svgNS, 'tspan');
-			this._textElement.appendChild(tspan);
-			this._setTextContent(tspan, test);
+			this.__textElement.appendChild(tspan);
+			this.__setTextContent(tspan, test);
 			while (words.length && tspan.getComputedTextLength() < options.width) {
 				localstr += ' ' + words.shift();
 				test = localstr + ' ' + words[0];
-				this._setTextContent(tspan, test);
+				this.__setTextContent(tspan, test);
 			}
 			localstr += words.length ? ' ' : '';
-			this._setTextContent(tspan, localstr);
+			this.__setTextContent(tspan, localstr);
             setAttributes.call(tspan, {
-                'dy': this._lineHeight,
+                'dy': this.__lineHeight,
                 'x': options.isCenterAligned ? options.x + options.width / 2 : options.x,
                 'class': 'js-activity-shape'
             })
 			stringsNum++;
 		}
-        setAttributes.call(this._textElement, {
+        setAttributes.call(this.__textElement, {
             'x': options.isCenterAligned ? options.x + options.width / 2 : options.x,
-            'y': options.isVerticalCenterAligned ? options.y + options.height / 2 - this._lineHeight * stringsNum / 2 : options.y,
+            'y': options.isVerticalCenterAligned ? options.y + options.height / 2 - this.__lineHeight * stringsNum / 2 : options.y,
             'text-anchor': options.isCenterAligned ? 'middle' : 'start'
         })
-
-        if (this.isInEditMode()) {            
-            this._textbb = this._textElement.getBBox();
-            let tspans = this._textElement.childNodes;
-            this._stringsNum = tspans.length;
-            this._stringsData = [];
-            this._stringsData.lenght = this._stringsNum;
-            for (let i = 0; i < this._stringsNum; i++) {
-                this._stringsData[i] = tspans[i].getNumberOfChars();
-            }
-        }
+        this.__init();
     }
 
-    _renderTimeout() {
-        if (!this._rendering) {
-            this._rendering = true;
-            let mod = this._value !== inputElement.value;
-            this._value = inputElement.value;
-            this._lastSelect = inputElement.selectionEnd;
+    __renderTimeout() {
+        if (!this.__rendering) {
+            this.__rendering = true;
+            let mod = this.__value !== inputElement.value;
+            this.__value = inputElement.value;
+            this.__lastSelectEnd = inputElement.selectionEnd;
+            this.__lastSelectStart = inputElement.selectionStart;
             setTimeout(() => {
-                mod && this._render();
-                this._setCursor(this._lastSelect);
-                this._rendering = false;
-                if (this._value !== inputElement.value) this._renderTimeout();
+                mod && this.__render();
+                this.__rendering = false;
+                if (this.__value !== inputElement.value) {
+                    this.__renderTimeout();
+                } else {                    
+                    if (this.__lastSelectStart === this.__lastSelectEnd) {
+                        this.__setCursor(this.__lastSelectEnd);
+                    }
+                    else
+                        this.__setSelection(this.__lastSelectStart, this.__lastSelectEnd - 1);
+                }
             }, 0);
         }
     }
 
     dispose() {
-        $(this._textElement).remove();
+        editables.splice(editables.indexOf(this), 1);
+        $(this.__textElement).remove();
+        this.__deleteCursor();
+        this.__deleteSelBlock();
+        delete this.__options;
     }
 
-    clear() {
-        $(this._textElement).empty();
-    }
-
-    _setTextContent(el, str) {        
-		$(el).empty();
-		$(el).append(str);
-    }
-
-    _appendInputElement() {
+    __appendInputElement() {
         if (!inputElement) {
             let input = document.createElement('input');
             input.type = 'text';
@@ -295,82 +321,116 @@ export default class TextEditor {
         }
     }
 
-    _appendTextElement() {
-        this._textElement = document.createElementNS(svgNS, 'text');
-        setAttributes.call(this._textElement, {
+    __setInputSelection() {
+        inputElement.focus();
+        let back = this.__lastSelectEnd < this.__lastSelectStart;
+        let from = this.__lastSelectStart;
+        let to = this.__lastSelectEnd;
+        if (back)
+            [from, to] = [to, from];
+        inputElement.selectionStart = from;
+        inputElement.selectionEnd = to;
+        inputElement.selectionDirection = back ? 'backward' : 'forward';
+    }
+
+    __appendTextElement() {
+        this.__textElement = document.createElementNS(svgNS, 'text');
+        setAttributes.call(this.__textElement, {
             'fill': '#746e6e',
             //'class': tspanClass
         })
-        this._textElement.style['white-space'] = 'pre';
-        this._root.appendChild(this._textElement);
+        this.__textElement.style['white-space'] = 'pre';
+        this.__root.appendChild(this.__textElement);
     }
 
-    _appendCursorElement() {
-        this._cursor = document.createElementNS(svgNS, 'line');
-        setAttributes.call(this._cursor, {
+    __appendCursorElement() {
+        this.__cursor = document.createElementNS(svgNS, 'line');
+        setAttributes.call(this.__cursor, {
             'stroke': '#333',
             'stroke-width': 1
         })
-        this._root.appendChild(this._cursor);
+        this.__root.appendChild(this.__cursor);
     }
 
-	_lactCharIndex(line) {	
-		let cur = 0;	
-		let sum = this._stringsData[cur];
-		while(cur < line) {
-			sum += this._stringsData[++cur];
-		}
-		return sum - 1;
-	}
-
-	_firstCharIndex(line) {
-		let cur = 0;		
-		let sum = 0;
-		while(cur < line) {
-			sum += this._stringsData[cur++];
-		}
-		return sum;
-	}
-
-    _keyup(event) {
-        event.stopPropagation();
-		$('.js-texteditor-selblock', $(this._root)).remove();
-        this._renderTimeout();
-    }
-
-    _mouseDown(event) {
-        event.stopPropagation();
-        this._selecting = true;
-        if (this.isInEditMode()) {
-            inputElement.focus();
-            this._lastSelect = this._getIndexFromPos(event.pageX, event.pageY);
-            this._setCursor(this._lastSelect);
+    __deleteCursor() {
+        if (this.__blink) {
+            clearInterval(this.__blink);
+            this.__blink = false;
+        }
+        if(this.__cursor) {
+            $(this.__cursor).remove();
+            this.__cursor = false;
         }
     }
 
-    _mouseMove(event) {        
+    __setTextContent(el, str) {        
+		$(el).empty();
+		$(el).append(str);
+    }
+    
+    __deleteSelBlock() {        
+		$('.js-texteditor-selblock', $(this.__root)).remove();
+    }
+    
+    __setTextContent(el, str) {        
+		$(el).empty();
+		$(el).append(str);
+    }
+
+    __keyup(event) {
         event.stopPropagation();
-        if (this.isInEditMode() && this._selecting) {
+		this.__deleteSelBlock();
+        this.__renderTimeout();
+    }
+
+    __mouseDown(event) {
+        event.stopPropagation();
+        event.preventDefault();
+        this.__selecting = true;
+        if (this.__isInEditMode()) {
             inputElement.focus();
-            let newPos = this._getIndexFromPos(event.pageX, event.pageY);
-            if (this._lastSelect !== newPos) {
-                this._setSelection(Math.min(this._lastSelect, newPos), Math.max(this._lastSelect, newPos));
+            this.__lastSelectStart = this.__lastSelectEnd = this.__getIndexFromPos(event.pageX, event.pageY);
+            this.__setCursor(this.__lastSelectStart);
+            $(document).one('mouseup', e => this.__mouseUp(e));
+            $(this.__textElement).bind('mousemove', e => this.__mouseMove(e));
+        }
+    }
+
+    __mouseMove(event) {        
+        event.stopPropagation();
+        event.preventDefault();
+        if (this.__isInEditMode() && this.__selecting) {
+            inputElement.focus();
+            this.__lastSelectEnd = this.__getIndexFromPos(event.pageX, event.pageY);
+            if (this.__lastSelectStart !== this.__lastSelectEnd) {
+                this.__setInputSelection();
+                let from = Math.min(this.__lastSelectStart, this.__lastSelectEnd);
+                let to = Math.max(this.__lastSelectStart, this.__lastSelectEnd) - 1;
+
+                this.__setSelection(from, to);
             }
         }
     }
 
-    _mouseUp(event) {
+    __mouseUp(event) {
         event.stopPropagation();
+        event.preventDefault();
         inputElement.focus();
-        this._selecting = false;
+        this.__selecting = false;
+        if (this.__lastSelectStart === this.__lastSelectEnd) {      
+            this.__setCursor(this.__lastSelectStart);
+        } else {
+            this.__setInputSelection();
+        }
+        $(this.__textElement).unbind('mousemove');
     }
 
-    static setInputElement(el) {
+    static set InputElement(el) {
         if (!(el instanceof HTMLInputElement)) throw 'element is not HTMLInputElement';
         inputElement = el;
     }
     
-    static getInputElement(el) {
+    static get InputElement() {
         return inputElement;
     }
 }

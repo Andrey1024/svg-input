@@ -9,9 +9,16 @@ module.exports = {
   },
   
   devtool: 'source-map',
+  devServer: {
+    inline:true,
+    port: 8008
+  },
   module: {
     loaders: [      
-      { test: /\.js$/, exclude: /node_modules/, loader:"babel-loader" },
+      { test: /\.js$/, exclude: /node_modules/, loader:"babel-loader", query: {
+          presets: ['es2015']
+        }
+      },
     ]
   }
 };

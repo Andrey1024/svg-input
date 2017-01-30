@@ -4,14 +4,16 @@
         <script src="dist/bundle.js"></script>
     </head>
     <style>
-        #root {
-            width: 500;
+        #root, #svg {
+            width: 700;
             height: 500;
         }
     </style>
     <body>
         <div id="root">
             <svg id="svg">
+                <g id="parent" transform="rotate(10)">
+                </g>
             </svg>
         </div>
     </body>
