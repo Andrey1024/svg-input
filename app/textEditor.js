@@ -1,7 +1,7 @@
 import $ from 'jquery'
 const svgNS = 'http://www.w3.org/2000/svg';
 let inputElement;
-let editables = [];
+let nowEdit;
 
 function setAttributes(obj) {
     for (let prop in obj) {
@@ -17,27 +17,29 @@ export default class TextEditor {
         this.__value = string;
         this.__root = parent;
 
+        this.__tspanClass = '';
+
         this.__appendInputElement();
         this.__appendTextElement();
         this.__render();
-        editables.push(this);
     }
 
     startEdit(event) {
         this.__promise = $.Deferred();
-        editables.filter(e => e != this).forEach((e) => {
-            e.endEdit();
-        })
+        if (nowEdit && nowEdit != this) nowEdit.endEdit();
+        nowEdit = this;
+        this.show();
 
         inputElement.value = this.__value;
         inputElement.focus();
         $(inputElement).bind('keyup input', e => this.__keyup(e));
+        $(inputElement).bind('blur', () => this.endEdit());
         $(this.__textElement).bind('mousedown', e => this.__mouseDown(e));
-        $(inputElement).blur(() => this.endEdit());
+        $(this.__textElement).bind('click', e => this.__mouseClick(e));
+        $(this.__textElement).bind('dblclick', e => this.__mouseDblclick(e));
 
         this.__init();
         let index = event ? this.__getIndexFromPos(event.pageX, event.pageY) : this.__value.length;
-        this.__lastSelectEnd = this.__lastSelectStart = index;
         this.__setCursor(index);
         return this.__promise.promise();
     }
@@ -45,9 +47,13 @@ export default class TextEditor {
     endEdit() {
         if (!this.__promise) return;
         
+        nowEdit = false;
         $(inputElement).unbind('keyup input');
+        $(inputElement).unbind('blur');
         $(this.__textElement).unbind('mousedown');
         $(this.__textElement).unbind('mousemove');
+        $(this.__textElement).unbind('dblclick');
+        $(this.__textElement).unbind('click');
         this.__deleteCursor();
         this.__deleteSelBlock();
         this.__promise.resolve(inputElement.value);
@@ -63,7 +69,16 @@ export default class TextEditor {
         this.__render();
     }
 
-    __isInEditMode() {
+    hide() {
+        this.endEdit();
+        $(this.__textElement).hide();
+    }
+
+    show() {
+        $(this.__textElement).show();
+    }
+
+    isInEditMode() {
         return !!this.__promise;
     }
 
@@ -95,6 +110,20 @@ export default class TextEditor {
 		}
 		return sum;
 	}
+
+    __getWordBounds(index) {
+        let words = this.__value.split(' ');
+        let start = 0;
+        let end = words.shift().length;
+        while (end < index) {
+            start = end + 1;
+            end +=  words.shift().length + 1;
+        }
+        return {
+            start: start,
+            end: end
+        }
+    }
 
     __getCharBBox(index) {
         if (this.__value.length == 0) {
@@ -230,7 +259,7 @@ export default class TextEditor {
     }
 
     __init() {
-        if (this.__isInEditMode()) {            
+        if (this.isInEditMode()) {            
             this.__textbb = this.__textElement.getBBox();
             let tspans = this.__textElement.childNodes;
             this.__stringsNum = tspans.length;
@@ -242,6 +271,11 @@ export default class TextEditor {
         }
     }
 
+    __testWidth(tspan, string) {
+        this.__setTextContent(tspan, string);
+        return tspan.getComputedTextLength() < this.__options.width;
+    }
+
     __render() {
 		if (!document.body.contains(this.__textElement)) return;
         $(this.__textElement).empty();
@@ -249,22 +283,35 @@ export default class TextEditor {
 		let stringsNum = 0;
 		let words = this.__value.split(' ');
 		while (words.length) {
-			let localstr = words.shift();
-			let test = localstr + ' ' + words[0];
 			let tspan = document.createElementNS(svgNS, 'tspan');
 			this.__textElement.appendChild(tspan);
-			this.__setTextContent(tspan, test);
-			while (words.length && tspan.getComputedTextLength() < options.width) {
-				localstr += ' ' + words.shift();
-				test = localstr + ' ' + words[0];
-				this.__setTextContent(tspan, test);
-			}
-			localstr += words.length ? ' ' : '';
+
+            let test = '';
+			let localstr =  words.shift();
+
+            if (!this.__testWidth(tspan, localstr)) {
+                let word = localstr.split('');
+                localstr = word.shift();
+                test = localstr + word[0];
+                while (this.__testWidth(tspan, test)) {
+                    localstr += word.shift();
+                    test = localstr + word[0];
+                }
+                words.unshift(word.join(''));
+            } else {
+                test = localstr + ' ' + words[0];
+                while (words.length && this.__testWidth(tspan, test)) {
+                    localstr += ' ' + words.shift();
+                    test = localstr + ' ' + words[0];
+                }
+                localstr += words.length ? ' ' : '';
+            }
+
 			this.__setTextContent(tspan, localstr);
             setAttributes.call(tspan, {
                 'dy': this.__lineHeight,
                 'x': options.isCenterAligned ? options.x + options.width / 2 : options.x,
-                'class': 'js-activity-shape'
+                'class': this.__tspanClass
             })
 			stringsNum++;
 		}
@@ -299,8 +346,8 @@ export default class TextEditor {
         }
     }
 
-    dispose() {
-        editables.splice(editables.indexOf(this), 1);
+    destroy() {
+        nowEdit = false;
         $(this.__textElement).remove();
         this.__deleteCursor();
         this.__deleteSelBlock();
@@ -322,7 +369,6 @@ export default class TextEditor {
     }
 
     __setInputSelection() {
-        inputElement.focus();
         let back = this.__lastSelectEnd < this.__lastSelectStart;
         let from = this.__lastSelectStart;
         let to = this.__lastSelectEnd;
@@ -379,16 +425,52 @@ export default class TextEditor {
 
     __keyup(event) {
         event.stopPropagation();
+        if (event.keyCode == 13) {
+            this.endEdit();
+            return;
+        }
+        if (event.keyCode == 65 && event.ctrlKey == true) {
+            inputElement.selectionStart = 0;
+            inputElement.selectionEnd = inputElement.value.length;
+        }
 		this.__deleteSelBlock();
         this.__renderTimeout();
+    }
+
+    __mouseClick(event) {
+        event.stopPropagation();
+        event.preventDefault();
+
+        if (event.detail == 3) {
+            inputElement.selectionStart = 0;
+            inputElement.selectionEnd = inputElement.value.length;
+            this.__setSelection(0, this.__value.length);
+        }
+    }
+
+    __mouseDblclick(event) {        
+        event.stopPropagation();
+        event.preventDefault();
+        if (this.isInEditMode()) {     
+            let index = this.__getIndexFromPos(event.pageX, event.pageY)       
+            let selectWord = this.__getWordBounds(index);
+            this.__lastSelectStart = selectWord.start;
+            this.__lastSelectEnd = selectWord.end;
+            if (this.__lastSelectStart !== this.__lastSelectEnd) {
+                this.__setInputSelection();
+                let from = Math.min(this.__lastSelectStart, this.__lastSelectEnd);
+                let to = Math.max(this.__lastSelectStart, this.__lastSelectEnd) - 1;
+
+                this.__setSelection(from, to);
+            }
+        }
     }
 
     __mouseDown(event) {
         event.stopPropagation();
         event.preventDefault();
         this.__selecting = true;
-        if (this.__isInEditMode()) {
-            inputElement.focus();
+        if (this.isInEditMode()) {
             this.__lastSelectStart = this.__lastSelectEnd = this.__getIndexFromPos(event.pageX, event.pageY);
             this.__setCursor(this.__lastSelectStart);
             $(document).one('mouseup', e => this.__mouseUp(e));
@@ -399,8 +481,7 @@ export default class TextEditor {
     __mouseMove(event) {        
         event.stopPropagation();
         event.preventDefault();
-        if (this.__isInEditMode() && this.__selecting) {
-            inputElement.focus();
+        if (this.isInEditMode() && this.__selecting) {
             this.__lastSelectEnd = this.__getIndexFromPos(event.pageX, event.pageY);
             if (this.__lastSelectStart !== this.__lastSelectEnd) {
                 this.__setInputSelection();
@@ -432,5 +513,9 @@ export default class TextEditor {
     
     static get InputElement() {
         return inputElement;
+    }
+
+    set textClass(c) {
+        this.__tspanClass = c;
     }
 }

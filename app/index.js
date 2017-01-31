@@ -3,7 +3,7 @@ import $ from 'jquery'
 
 $(document).ready(() => {
     let edit = new Editor($('#parent')[0], 'Edit me!', {
-        x: 10,
+        x: 100,
         y: 10,
         width: 250, 
         height: 250,
