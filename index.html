@@ -1,7 +1,8 @@
 <html>
     <head>
         <title>Svg Text Editor</title>
-        <script src="dist/bundle.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+        <script src="./dist/svg-text-editor.js"></script>
     </head>
     <style>
         #root, #svg {
@@ -16,5 +17,24 @@
                 </g>
             </svg>
         </div>
+        <script type="text/javascript">
+            $(document).ready(function() {
+                let edit = new TextEditor.default($('#parent')[0], 'Edit me!', {
+                    x: 100,
+                    y: 10,
+                    width: 250, 
+                    height: 250,
+                    isCenterAligned: true,
+                    isVerticalCenterAligned: true
+                });
+                function start(e) {
+                    edit.startEdit(e).then(function(ret) {
+                        alert(ret);
+                        $('#svg').one('click', start);
+                    })
+                }
+                $('#svg').one('click', start);
+            })
+        </script>
     </body>
 </html>

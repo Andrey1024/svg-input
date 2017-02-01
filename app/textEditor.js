@@ -1,4 +1,3 @@
-import $ from 'jquery'
 const svgNS = 'http://www.w3.org/2000/svg';
 let inputElement;
 let nowEdit;
@@ -11,17 +10,33 @@ function setAttributes(obj) {
 
 export default class TextEditor {
     constructor(parent, string, options) {
-        this.__lineHeight = 15;
+        this.__initialize(parent, string, options);
+        this.__render();
+    }
 
-        this.__options = options; //TODO: default values
-        this.__value = string;
+    update(parent, string, options) {
+        this.__initialize(parent, string, options);
+        this.__render();
+    }
+
+    __initialize(parent, string, options) {
+        this.__value = string || '';
         this.__root = parent;
-
-        this.__tspanClass = '';
 
         this.__appendInputElement();
         this.__appendTextElement();
-        this.__render();
+        this.__options = {
+            x: options.x || 0,
+            y: options.y || 0,
+            width: options.width || 100,
+            height: options.height || 100,
+            isCenterAligned: options.isCenterAligned || false,
+            isVerticalCenterAligned: options.isVerticalCenterAligned || false,
+        };
+        this.__tspanClass = options.tspanClass || '';
+        let symHeight = this.__testHeight();
+        this.__lineHeight = options.lineHeight || symHeight || 15;
+        this.__cursorHeight =  symHeight || 15;
     }
 
     startEdit(event) {
@@ -58,15 +73,6 @@ export default class TextEditor {
         this.__deleteSelBlock();
         this.__promise.resolve(inputElement.value);
         this.__promise = false;
-    }
-
-    update(parent, string, options) {
-        this.endEdit();
-        this.__options = options;
-        this.__value = string;
-        this.__root = parent;
-        if (!document.body.contains(this.__textElement)) parent.appendChild(this.__textElement);
-        this.__render();
     }
 
     hide() {
@@ -131,17 +137,18 @@ export default class TextEditor {
                 x: this.__options.isCenterAligned ? this.__options.x + this.__options.width / 2 : this.__options.x,
                 y: this.__options.isVerticalCenterAligned ? this.__options.y + (this.__options.height - this.__lineHeight) / 2 : this.__options.y,
                 width: 0,
-                height: this.__lineHeight
+                height: this.__cursorHeight
             }
         }
         if (this.__value.length <= index) {
-            let end = this.__textElement.getEndPositionOfChar(this.__value.length - 1);
+            let index = this.__value.length - 1;
+            let end = this.__textElement.getEndPositionOfChar(index);
             let line = this.__getLineOfChar(index);
             return {
                 x: end.x,
                 y: this.__textbb.y + this.__lineHeight * line,
                 width: 0,
-                height: this.__lineHeight
+                height: this.__cursorHeight
             }
         }
 		let start = this.__textElement.getStartPositionOfChar(index);
@@ -152,29 +159,22 @@ export default class TextEditor {
 			x: start.x,
 			y: this.__textbb.y + this.__lineHeight * line,
 			width: end.x - start.x,
-			height: this.__lineHeight
+			height: this.__cursorHeight
 		}
     }
 
-	__appendSelblock(left, right) {
-        let dstr =  'M' + left.tx  + ',' + left.ty
+    __dstr(left, right) {
+        return   'M' + left.tx  + ',' + left.ty
                  + ' L' + right.tx + ',' + right.ty
                  + ' '  + right.bx + ',' + right.by
                  + ' '  + left.bx  + ',' + left.by;
-		let select = document.createElementNS(svgNS, 'path');
-        setAttributes.call(select, {
-            'fill': 'green',
-            'opacity': 0.5,
-            'class': 'js-texteditor-selblock',
-            'd': dstr
-        });
-        select.style['pointer-events'] = 'none';
-        this.__root.appendChild(select);
-	}
+    }
     
     __setSelection(from, to) {
 		this.__deleteCursor();
         this.__deleteSelBlock();
+
+        let dstr = '';
 
 		let curLine = this.__getLineOfChar(from);
 		let endLine = this.__getLineOfChar(to);
@@ -199,7 +199,7 @@ export default class TextEditor {
 				bx: toBBox.x + toBBox.width,
 				by: toBBox.y + toBBox.height
 			}
-            this.__appendSelblock(l, r);
+            dstr += this.__dstr(l, r);
 			fromChar = this.__firstCharIndex(++curLine);
 			let fromBBox = this.__getCharBBox(fromChar);
 			l = {
@@ -218,7 +218,8 @@ export default class TextEditor {
 			bx: toBBox.x + toBBox.width,
 			by: toBBox.y + toBBox.height
 		};
-        this.__appendSelblock(l, r);
+        dstr += this.__dstr(l, r);
+		this.__appendSelblock(dstr);
 	}
 
     __setCursor(index) {
@@ -328,26 +329,24 @@ export default class TextEditor {
             this.__rendering = true;
             let mod = this.__value !== inputElement.value;
             this.__value = inputElement.value;
-            this.__lastSelectEnd = inputElement.selectionEnd;
-            this.__lastSelectStart = inputElement.selectionStart;
             setTimeout(() => {
                 mod && this.__render();
                 this.__rendering = false;
                 if (this.__value !== inputElement.value) {
                     this.__renderTimeout();
                 } else {                    
-                    if (this.__lastSelectStart === this.__lastSelectEnd) {
-                        this.__setCursor(this.__lastSelectEnd);
+                    if (inputElement.selectionStart === inputElement.selectionEnd) {
+                        this.__setCursor(inputElement.selectionEnd);
                     }
                     else
-                        this.__setSelection(this.__lastSelectStart, this.__lastSelectEnd - 1);
+                        this.__setSelection(inputElement.selectionStart, inputElement.selectionEnd - 1);
                 }
             }, 0);
         }
     }
 
     destroy() {
-        nowEdit = false;
+        this.endEdit();
         $(this.__textElement).remove();
         this.__deleteCursor();
         this.__deleteSelBlock();
@@ -380,13 +379,25 @@ export default class TextEditor {
     }
 
     __appendTextElement() {
-        this.__textElement = document.createElementNS(svgNS, 'text');
-        setAttributes.call(this.__textElement, {
-            'fill': '#746e6e',
-            //'class': tspanClass
-        })
-        this.__textElement.style['white-space'] = 'pre';
-        this.__root.appendChild(this.__textElement);
+        if (!this.__textElement) {
+            this.__textElement = document.createElementNS(svgNS, 'text');
+            setAttributes.call(this.__textElement, {
+                'fill': '#333',
+                'class': 'svg-text-editor-text'
+            })
+            this.__textElement.style['white-space'] = 'pre';
+        }
+        if (!document.body.contains(this.__textElement)) this.__root.appendChild(this.__textElement);
+    }
+
+    __testHeight() {
+        if (!document.body.contains(this.__textElement)) return 0;
+        $(this.__textElement).empty();
+        $(this.__textElement).append(' ');
+        let res = this.__textElement.getBBox().height;
+        $(this.__textElement).empty();
+
+        return res;
     }
 
     __appendCursorElement() {
@@ -414,15 +425,21 @@ export default class TextEditor {
 		$(el).append(str);
     }
     
+	__appendSelblock(dstr) {
+		this.__select = document.createElementNS(svgNS, 'path');
+        setAttributes.call(this.__select, {
+            'fill': 'green',
+            'opacity': 0.5,
+            'd': dstr
+        });
+        this.__select.style['pointer-events'] = 'none';
+        this.__root.appendChild(this.__select);
+	}
+    
     __deleteSelBlock() {        
-		$('.js-texteditor-selblock', $(this.__root)).remove();
+        $(this.__select).remove();
     }
     
-    __setTextContent(el, str) {        
-		$(el).empty();
-		$(el).append(str);
-    }
-
     __keyup(event) {
         event.stopPropagation();
         if (event.keyCode == 13) {
@@ -496,7 +513,6 @@ export default class TextEditor {
     __mouseUp(event) {
         event.stopPropagation();
         event.preventDefault();
-        inputElement.focus();
         this.__selecting = false;
         if (this.__lastSelectStart === this.__lastSelectEnd) {      
             this.__setCursor(this.__lastSelectStart);

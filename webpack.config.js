@@ -1,9 +1,11 @@
 var path = require('path');
 
 module.exports = {
-  entry: './app/index.js',
+  entry: './app/textEditor.js',
   output: {
-    filename: 'bundle.js',
+    library: 'TextEditor',
+    libraryTarget: 'umd',
+    filename: 'svg-text-editor.js',
     path: path.resolve(__dirname, 'dist'),
     publicPath: 'dist'
   },
